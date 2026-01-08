@@ -69,8 +69,9 @@ parentPort.on('message', async (message) => {
         // So we wait for exit() to be called.
 
         // We also need a timeout in case it doesn't call exit (unlikely for CLI but possible)
+        // Set to 1 hour (3600000 ms) effectively removing the limit for the user
         const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Worker Timeout')), 60000)
+            setTimeout(() => reject(new Error('Worker Timeout')), 3600000)
         );
 
         await Promise.race([exitPromise, timeoutPromise]);
