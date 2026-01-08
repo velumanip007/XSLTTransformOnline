@@ -5,9 +5,12 @@ import { Upload, Trash2, ArrowRightLeft, FileCode, Code, Loader2 } from 'lucide-
 function App() {
   const [xmlInput, setXmlInput] = useState('');
   const [xsltInput, setXsltInput] = useState('');
+  const [xsdInput, setXsdInput] = useState('');
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [mode, setMode] = useState('transform'); // 'transform' | 'validate'
+
 
   const handleFileUpload = (e, setInput) => {
     const file = e.target.files[0];
@@ -40,6 +43,37 @@ function App() {
     }
   };
 
+  const handleValidate = async () => {
+    setLoading(true);
+    setError(null);
+    setOutput('');
+
+    try {
+      const response = await axios.post('/api/validate', {
+        xml: xmlInput,
+        xsd: xsdInput,
+      });
+
+      const { valid, errors } = response.data;
+      if (valid) {
+        setOutput('✅ XML is VALID against the XSD Schema.');
+      } else {
+        const errorMsg = ['❌ XML is INVALID:', ...errors].join('\n');
+        setOutput(errorMsg);
+        // Also set error state to show red color in header if desired, 
+        // but output area handles it well. 
+        // Let's set error state for consistency if we want red text.
+        // setError('Validation Failed'); // removed to show details
+        setOutput(errorMsg); // Override output to show details
+      }
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.error || err.message || 'Validation request failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const clearConsole = () => {
     setOutput('');
     setError(null);
@@ -47,12 +81,30 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background text-slate-200 p-4 md:p-8 flex flex-col items-center">
-      <header className="w-full max-w-7xl mb-8 flex items-center justify-between border-b border-white/10 pb-4">
-        <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent flex items-center gap-2">
-          <ArrowRightLeft className="text-blue-400" />
-          XSLT Transformer
-        </h1>
-        <div className="text-sm text-slate-400">Supports XSLT 1.0 & 2.0</div>
+      <header className="w-full max-w-7xl mb-8 flex flex-col items-center gap-4 border-b border-white/10 pb-4">
+        <div className="w-full flex items-center justify-between">
+          <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent flex items-center gap-2">
+            <ArrowRightLeft className="text-blue-400" />
+            XSLT Transformer
+          </h1>
+          <div className="text-sm text-slate-400">Supports XSLT 1.0 & 2.0 + XSD</div>
+        </div>
+
+        {/* Mode Switcher */}
+        <div className="flex bg-slate-900 p-1 rounded-lg border border-white/10">
+          <button
+            onClick={() => setMode('transform')}
+            className={`px-6 py-2 rounded-md font-medium text-sm transition-all ${mode === 'transform' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+          >
+            Transformation
+          </button>
+          <button
+            onClick={() => setMode('validate')}
+            className={`px-6 py-2 rounded-md font-medium text-sm transition-all ${mode === 'validate' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+          >
+            Validator
+          </button>
+        </div>
       </header>
 
       <main className="w-full max-w-7xl grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 flex-grow">
@@ -76,35 +128,56 @@ function App() {
           />
         </div>
 
-        {/* XSLT Section */}
-        <div className="flex flex-col gap-2">
-          <div className="flex justify-between items-center mb-1">
-            <label className="flex items-center gap-2 font-semibold text-purple-300">
-              <Code size={18} /> XSLT Stylesheet
-            </label>
-            <label className="cursor-pointer flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors border border-white/10">
-              <Upload size={14} />
-              Browse File
-              <input type="file" accept=".xsl,.xslt" className="hidden" onChange={(e) => handleFileUpload(e, setXsltInput)} />
-            </label>
+        {/* Right Section (XSLT or XSD) */}
+        {mode === 'transform' ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="flex items-center gap-2 font-semibold text-purple-300">
+                <Code size={18} /> XSLT Stylesheet
+              </label>
+              <label className="cursor-pointer flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors border border-white/10">
+                <Upload size={14} />
+                Browse File
+                <input type="file" accept=".xsl,.xslt" className="hidden" onChange={(e) => handleFileUpload(e, setXsltInput)} />
+              </label>
+            </div>
+            <textarea
+              className="flex-grow w-full h-[600px] bg-surface border border-white/10 rounded-lg p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all resize-none shadow-inner"
+              placeholder="Paste your XSLT here..."
+              value={xsltInput}
+              onChange={(e) => setXsltInput(e.target.value)}
+            />
           </div>
-          <textarea
-            className="flex-grow w-full h-[600px] bg-surface border border-white/10 rounded-lg p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all resize-none shadow-inner"
-            placeholder="Paste your XSLT here..."
-            value={xsltInput}
-            onChange={(e) => setXsltInput(e.target.value)}
-          />
-        </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="flex items-center gap-2 font-semibold text-emerald-300">
+                <FileCode size={18} /> XSD Schema
+              </label>
+              <label className="cursor-pointer flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors border border-white/10">
+                <Upload size={14} />
+                Browse File
+                <input type="file" accept=".xsd" className="hidden" onChange={(e) => handleFileUpload(e, setXsdInput)} />
+              </label>
+            </div>
+            <textarea
+              className="flex-grow w-full h-[600px] bg-surface border border-white/10 rounded-lg p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all resize-none shadow-inner"
+              placeholder="Paste your XSD Schema here..."
+              value={xsdInput}
+              onChange={(e) => setXsdInput(e.target.value)}
+            />
+          </div>
+        )}
       </main>
 
       {/* Action Bar */}
       <div className="w-full max-w-7xl flex justify-center gap-4 mb-8">
         <button
-          onClick={handleTransform}
-          disabled={loading || !xmlInput || !xsltInput}
-          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold text-lg shadow-lg shadow-blue-500/20 transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2"
+          onClick={mode === 'transform' ? handleTransform : handleValidate}
+          disabled={loading || !xmlInput || (mode === 'transform' ? !xsltInput : !xsdInput)}
+          className={`px-8 py-3 rounded-xl font-bold text-lg shadow-lg transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${mode === 'transform' ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-500/20 text-white' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20 text-white'}`}
         >
-          {loading ? <Loader2 className="animate-spin" /> : 'Transform'}
+          {loading ? <Loader2 className="animate-spin" /> : (mode === 'transform' ? 'Transform' : 'Validate')}
         </button>
 
         <button

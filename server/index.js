@@ -87,6 +87,75 @@ app.post('/api/transform', async (req, res) => {
     }
 });
 
+/**
+ * Endpoint to validate XML against XSD
+ */
+app.post('/api/validate', async (req, res) => {
+    console.log("-> Received validation request");
+    const { xml, xsd } = req.body;
+
+    if (!xml || !xsd) {
+        return res.status(400).json({ error: 'Both XML and XSD content are required.' });
+    }
+
+    try {
+        console.log("   Importing libxml2-wasm...");
+        const libxmlModule = await import('libxml2-wasm');
+        // Destructure correct exports
+        const { XmlDocument, XsdValidator } = libxmlModule;
+
+        console.log("   Parsing XML and XSD...");
+        let xmlDoc, xsdDoc, validator;
+
+        try {
+            // Use XmlDocument.fromString
+            xmlDoc = XmlDocument.fromString(xml);
+            xsdDoc = XmlDocument.fromString(xsd);
+        } catch (parseError) {
+            console.error("   Parse Error:", parseError);
+            return res.json({ valid: false, errors: ["XML or XSD Parse Error: " + parseError.message] });
+        }
+
+        console.log("   Validating...");
+        let isValid = true;
+        let validationErrors = [];
+
+        try {
+            // Create Validator from XSD Doc
+            validator = XsdValidator.fromDoc(xsdDoc);
+
+            // Validate! 
+            // If valid: returns void (undefined).
+            // If invalid: THROWS XmlValidateError.
+            validator.validate(xmlDoc);
+
+            isValid = true;
+        } catch (valError) {
+            console.error("   Validation Failed (Expected):", valError);
+            // valError.details is an array of objects { message, line, col }
+            if (valError.details) {
+                validationErrors = valError.details.map(d => `Line ${d.line}: ${d.message.trim()}`);
+            } else {
+                validationErrors = [valError.message];
+            }
+            isValid = false;
+        }
+
+        console.log(`   Validation Result: ${isValid}`);
+
+        // Cleanup
+        if (xmlDoc) xmlDoc.dispose();
+        if (xsdDoc) xsdDoc.dispose();
+        if (validator) validator.dispose();
+
+        res.json({ valid: isValid, errors: validationErrors });
+
+    } catch (error) {
+        console.error("!! VALIDATION SERVER ERROR:", error);
+        res.status(500).json({ error: error.message || "An error occurred during validation." });
+    }
+});
+
 // Serve static files from the React app (Client)
 // In production, the client build will be in ../client/dist
 const clientBuildPath = path.join(__dirname, '../client/dist');
