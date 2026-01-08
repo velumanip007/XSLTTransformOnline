@@ -2,7 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs-extra');
 const path = require('path');
-const { execSync, execFileSync } = require('child_process');
+const { execSync, execFile } = require('child_process');
+const util = require('util');
+const execFileAsync = util.promisify(execFile);
 const SaxonJS = require('saxon-js');
 
 const app = express();
@@ -52,13 +54,17 @@ app.post('/api/transform', async (req, res) => {
         console.log("Compiling XSLT using:", xslt3JsPath);
 
         try {
-            // using execFileSync to avoid shell entirely
-            execFileSync(process.execPath, [
+            // using execFile (async) to avoid blocking and shell
+            const { stdout, stderr } = await execFileAsync(process.execPath, [
                 xslt3JsPath,
                 `-xsl:${xsltPath}`,
                 `-export:${sefPath}`,
                 '-nogo'
-            ]);
+            ], { timeout: 30000 }); // 30s timeout
+
+            if (stdout) console.log("XSLT3 stdout:", stdout);
+            if (stderr) console.error("XSLT3 stderr:", stderr);
+
         } catch (compileError) {
             console.error("Compilation Error Details:", compileError);
             // If compilation fails, read the stderr/stdout if available or just return the error message
