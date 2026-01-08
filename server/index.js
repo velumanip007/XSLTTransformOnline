@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs-extra');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const SaxonJS = require('saxon-js');
 
 const app = express();
@@ -46,16 +46,21 @@ app.post('/api/transform', async (req, res) => {
         await fs.writeFile(xsltPath, xslt);
 
         // 2. Compile XSLT to SEF using xslt3 command line tool
-        // We use the locally installed xslt3 executable from node_modules
-        const xslt3Path = path.resolve(__dirname, 'node_modules', '.bin', 'xslt3');
-        // On Windows, it might be xslt3.cmd
-        const xslt3Cmd = process.platform === 'win32' ? `${xslt3Path}.cmd` : xslt3Path;
+        // We execute xslt3.js directly to avoid permission issues with .cmd shims
+        const xslt3JsPath = path.resolve(__dirname, 'node_modules', 'xslt3', 'xslt3.js');
 
-        const compileCommand = `"${xslt3Cmd}" -xsl:"${xsltPath}" -export:"${sefPath}" -nogo`;
+        console.log("Compiling XSLT using:", xslt3JsPath);
 
         try {
-            execSync(compileCommand);
+            // using execFileSync to avoid shell entirely
+            execFileSync(process.execPath, [
+                xslt3JsPath,
+                `-xsl:${xsltPath}`,
+                `-export:${sefPath}`,
+                '-nogo'
+            ]);
         } catch (compileError) {
+            console.error("Compilation Error Details:", compileError);
             // If compilation fails, read the stderr/stdout if available or just return the error message
             throw new Error(`XSLT Compilation Failed: ${compileError.message}\n${compileError.stdout ? compileError.stdout.toString() : ''}`);
         }
