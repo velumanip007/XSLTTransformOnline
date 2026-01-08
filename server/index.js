@@ -6,9 +6,54 @@ const { execSync, execFile } = require('child_process');
 const util = require('util');
 const execFileAsync = util.promisify(execFile);
 const SaxonJS = require('saxon-js');
+const crypto = require('crypto');
+const { Worker } = require('worker_threads');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// In-memory cache for compiled SEF stylesheets
+const xsltCache = new Map();
+
+// Initialize XSLT Worker
+const xsltWorker = new Worker(path.join(__dirname, 'xslt_worker.js'));
+const pendingCompilations = new Map();
+
+xsltWorker.on('message', (msg) => {
+    if (msg.type === 'ready') {
+        console.log("XSLT Worker is ready and hot.");
+        return;
+    }
+    if (msg.type === 'error') {
+        console.error("XSLT Worker Error:", msg.error);
+        return;
+    }
+
+    // Handle compilation response
+    const { id, stdout, stderr, exitCode } = msg;
+    if (pendingCompilations.has(id)) {
+        const { resolve, reject } = pendingCompilations.get(id);
+        pendingCompilations.delete(id);
+
+        if (exitCode === 0) {
+            resolve({ stdout, stderr });
+        } else {
+            reject(new Error(`Worker exited with code ${exitCode}\nStderr: ${stderr}\nStdout: ${stdout}`));
+        }
+    }
+});
+
+xsltWorker.on('error', (err) => {
+    console.error("XSLT Worker Thread Error:", err);
+});
+
+function compileInWorker(args) {
+    return new Promise((resolve, reject) => {
+        const id = Date.now().toString() + Math.random();
+        pendingCompilations.set(id, { resolve, reject });
+        xsltWorker.postMessage({ id, args });
+    });
+}
 
 // Middleware
 app.use(cors());
@@ -45,35 +90,46 @@ app.post('/api/transform', async (req, res) => {
     try {
         // 1. Write content to temporary files
         await fs.writeFile(xmlPath, xml);
-        await fs.writeFile(xsltPath, xslt);
 
-        // 2. Compile XSLT to SEF using xslt3 command line tool
-        // We execute xslt3.js directly to avoid permission issues with .cmd shims
-        const xslt3JsPath = path.resolve(__dirname, 'node_modules', 'xslt3', 'xslt3.js');
+        // Check Cache for XSLT
+        const xsltHash = crypto.createHash('sha256').update(xslt).digest('hex');
+        let sefContent;
 
-        console.log("Compiling XSLT using:", xslt3JsPath);
+        if (xsltCache.has(xsltHash)) {
+            console.log("-> Cache HIT for XSLT. Using cached SEF.");
+            sefContent = xsltCache.get(xsltHash);
+        } else {
+            console.log("-> Cache MISS for XSLT. Compiling...");
+            await fs.writeFile(xsltPath, xslt);
 
-        try {
-            // using execFile (async) to avoid blocking and shell
-            const { stdout, stderr } = await execFileAsync(process.execPath, [
-                xslt3JsPath,
-                `-xsl:${xsltPath}`,
-                `-export:${sefPath}`,
-                '-nogo'
-            ], { timeout: 30000 }); // 30s timeout
+            console.log("   Compiling XSLT using Worker...");
+            console.time("XSLT3 Worker Time");
 
-            if (stdout) console.log("XSLT3 stdout:", stdout);
-            if (stderr) console.error("XSLT3 stderr:", stderr);
+            try {
+                // Use persistent worker
+                const { stdout, stderr } = await compileInWorker([
+                    `-xsl:${xsltPath}`,
+                    `-export:${sefPath}`,
+                    '-nogo'
+                ]);
 
-        } catch (compileError) {
-            console.error("Compilation Error Details:", compileError);
-            // If compilation fails, read the stderr/stdout if available or just return the error message
-            throw new Error(`XSLT Compilation Failed: ${compileError.message}\n${compileError.stdout ? compileError.stdout.toString() : ''}`);
+                console.timeEnd("XSLT3 Worker Time");
+
+                if (stdout) console.log("   Worker stdout:", stdout);
+                if (stderr) console.error("   Worker stderr:", stderr);
+
+            } catch (compileError) {
+                console.error("   Compilation Error Details:", compileError);
+                throw new Error(`XSLT Compilation Failed: ${compileError.message}`);
+            }
+
+            // Read compiled SEF
+            sefContent = await fs.readJson(sefPath);
+            // Update Cache
+            xsltCache.set(xsltHash, sefContent);
         }
 
         // 3. Transform using SaxonJS
-        const sefContent = await fs.readJson(sefPath);
-
         const result = await SaxonJS.transform({
             stylesheetInternal: sefContent,
             sourceFileName: xmlPath,
@@ -90,6 +146,8 @@ app.post('/api/transform', async (req, res) => {
         // 5. Cleanup
         try {
             await fs.remove(xmlPath);
+            // Only remove XSLT/SEF if they were physically created (Cache MISS)
+            // But fs.remove is safe to call even if files don't exist
             await fs.remove(xsltPath);
             await fs.remove(sefPath);
         } catch (cleanupError) {
