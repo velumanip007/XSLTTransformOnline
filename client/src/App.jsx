@@ -50,7 +50,7 @@ function App() {
       <header className="w-full max-w-7xl mb-8 flex items-center justify-between border-b border-white/10 pb-4">
         <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent flex items-center gap-2">
           <ArrowRightLeft className="text-blue-400" />
-          Antigravity XSLT Transformer
+          XSLT Transformer
         </h1>
         <div className="text-sm text-slate-400">Supports XSLT 1.0 & 2.0</div>
       </header>
@@ -69,7 +69,7 @@ function App() {
             </label>
           </div>
           <textarea
-            className="flex-grow w-full h-[300px] md:h-full bg-surface border border-white/10 rounded-lg p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all resize-none shadow-inner"
+            className="flex-grow w-full h-[600px] bg-surface border border-white/10 rounded-lg p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all resize-none shadow-inner"
             placeholder="Paste your XML here..."
             value={xmlInput}
             onChange={(e) => setXmlInput(e.target.value)}
@@ -89,7 +89,7 @@ function App() {
             </label>
           </div>
           <textarea
-            className="flex-grow w-full h-[300px] md:h-full bg-surface border border-white/10 rounded-lg p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all resize-none shadow-inner"
+            className="flex-grow w-full h-[600px] bg-surface border border-white/10 rounded-lg p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all resize-none shadow-inner"
             placeholder="Paste your XSLT here..."
             value={xsltInput}
             onChange={(e) => setXsltInput(e.target.value)}
@@ -116,7 +116,7 @@ function App() {
       </div>
 
       {/* Output Console */}
-      <div className="w-full max-w-7xl h-[400px] flex flex-col bg-black/50 rounded-xl border border-white/10 overflow-hidden shadow-2xl">
+      <div className="w-full max-w-7xl h-[600px] flex flex-col bg-black/50 rounded-xl border border-white/10 overflow-hidden shadow-2xl">
         <div className="bg-slate-900/80 p-3 border-b border-white/5 flex justify-between items-center backdrop-blur-sm">
           <span className="font-mono text-sm font-semibold text-emerald-400 flex items-center gap-2">
             Console Output

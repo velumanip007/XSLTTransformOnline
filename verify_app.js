@@ -43,7 +43,7 @@ const XSLT_SAMPLE = `<?xml version="1.0" encoding="UTF-8"?>
 setTimeout(async () => {
   try {
     console.log("Sending transformation request...");
-    const response = await axios.post('http://localhost:3002/api/transform', {
+    const response = await axios.post('http://localhost:3000/api/transform', {
       xml: XML_SAMPLE,
       xslt: XSLT_SAMPLE
     });
@@ -62,4 +62,4 @@ setTimeout(async () => {
     serverProcess.kill();
     process.exit();
   }
-}, 5000);
+}, 10000);
