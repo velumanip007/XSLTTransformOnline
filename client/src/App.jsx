@@ -120,7 +120,7 @@ function App() {
         <div className="w-full flex items-center justify-between">
           <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent flex items-center gap-2">
             <ArrowRightLeft className="text-blue-400" />
-            Client
+            XSLT Transformer
           </h1>
           <div className="text-sm text-slate-400">Supports XSLT 1.0 & 2.0 + XSD</div>
         </div>
