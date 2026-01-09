@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import { Upload, Trash2, ArrowRightLeft, FileCode, Code, Loader2 } from 'lucide-react';
-import SaxonJS from 'saxon-js';
 
 // Configure Axios base URL
 axios.defaults.baseURL = 'http://localhost:3000';
@@ -53,7 +52,7 @@ function App() {
 
       // Transform using SaxonJS
       // We use "async" execution to avoid freezing the UI for massive transforms
-      const result = await SaxonJS.transform({
+      const result = await window.SaxonJS.transform({
         stylesheetInternal: sef,
         sourceText: xmlInput,
         destination: "serialized"
