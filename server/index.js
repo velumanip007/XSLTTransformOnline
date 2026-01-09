@@ -64,6 +64,78 @@ process.on('unhandledRejection', (reason, promise) => {
 const TEMP_DIR = path.join(__dirname, 'temp');
 fs.ensureDirSync(TEMP_DIR);
 
+
+
+/**
+ * Endpoint to compile XSLT to SEF (for client-side execution)
+ */
+app.post('/api/compile', async (req, res) => {
+    const { xslt } = req.body;
+
+    if (!xslt) {
+        return res.status(400).json({ error: 'XSLT content is required.' });
+    }
+
+    const uniqueId = Date.now() + Math.random().toString(36).substring(7);
+    const xsltPath = path.join(TEMP_DIR, `${uniqueId}.xsl`);
+    const sefPath = path.join(TEMP_DIR, `${uniqueId}.sef.json`);
+
+    try {
+        // Check Cache for XSLT
+        const xsltHash = crypto.createHash('sha256').update(xslt).digest('hex');
+        let sefContent;
+
+        if (xsltCache.has(xsltHash)) {
+            console.log("-> Cache HIT for XSLT Compilation.");
+            sefContent = xsltCache.get(xsltHash);
+        } else {
+            console.log("-> Cache MISS for XSLT Compilation. Compiling...");
+            await fs.writeFile(xsltPath, xslt);
+
+            console.time("XSLT3 Compile Time");
+
+            try {
+                // Compile XSLT to SEF
+                await runWithXslt3([
+                    `-xsl:${xsltPath}`,
+                    `-export:${sefPath}`,
+                    '-nogo'
+                ]);
+
+                console.timeEnd("XSLT3 Compile Time");
+
+            } catch (compileError) {
+                console.error("   Compilation Error Details:", compileError);
+                throw new Error(`XSLT Compilation Failed: ${compileError.message}`);
+            }
+
+            // Read compiled SEF to cache it
+            if (await fs.pathExists(sefPath)) {
+                sefContent = await fs.readJson(sefPath);
+                xsltCache.set(xsltHash, sefContent);
+            } else {
+                throw new Error("Compilation failed to produce SEF file.");
+            }
+        }
+
+        res.json({ sef: sefContent });
+
+    } catch (error) {
+        console.error("Compilation Error:", error);
+        res.status(500).json({ error: error.message || "An error occurred during compilation." });
+    } finally {
+        // Cleanup
+        try {
+            await Promise.all([
+                fs.unlink(xsltPath).catch(() => { }),
+                fs.unlink(sefPath).catch(() => { })
+            ]);
+        } catch (cleanupError) {
+            console.error("Cleanup Error:", cleanupError);
+        }
+    }
+});
+
 /**
  * Endpoint to transform XML using XSLT
  */

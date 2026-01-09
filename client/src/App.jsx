@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import { Upload, Trash2, ArrowRightLeft, FileCode, Code, Loader2 } from 'lucide-react';
+import SaxonJS from 'saxon-js';
+
+// Configure Axios base URL
+axios.defaults.baseURL = 'http://localhost:3000';
 
 function App() {
   const [xmlInput, setXmlInput] = useState('');
@@ -10,7 +14,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [mode, setMode] = useState('transform'); // 'transform' | 'validate'
-
 
   const handleFileUpload = (e, setInput) => {
     const file = e.target.files[0];
@@ -24,20 +27,46 @@ function App() {
   };
 
   const handleTransform = async () => {
+    if (!xmlInput || !xsltInput) {
+      setError('Please provide both XML and XSLT content.');
+      return;
+    }
+
     setLoading(true);
-    setError(null);
+    setError('');
     setOutput('');
 
     try {
-      const response = await axios.post('/api/transform', {
-        xml: xmlInput,
-        xslt: xsltInput,
+      // Hybrid Approach: 
+      // 1. Compile XSLT on Server -> SEF
+      // 2. Transform on Client (Browser)
+
+      console.log("Step 1: Requesting XSLT Compilation from Server...");
+      const compileResponse = await axios.post('/api/compile', {
+        xslt: xsltInput
       });
 
-      setOutput(response.data.output);
+      const sef = compileResponse.data.sef;
+      console.log("Step 1 Complete. SEF Received.");
+
+      console.log("Step 2: Transforming locally in Browser using SaxonJS...");
+
+      // Transform using SaxonJS
+      // We use "async" execution to avoid freezing the UI for massive transforms
+      const result = await SaxonJS.transform({
+        stylesheetInternal: sef,
+        sourceText: xmlInput,
+        destination: "serialized"
+      }, "async");
+
+      console.log("Step 2 Complete. Transformation Success.");
+
+      setOutput(result.principalResult);
+
     } catch (err) {
-      console.error(err);
-      setError(err.response?.data?.error || err.message || 'Transformation failed');
+      console.error("Transformation Error:", err);
+      const errorMsg = err.response?.data?.error || err.message || "An error occurred during transformation.";
+      setError(`Transformation Failed: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
