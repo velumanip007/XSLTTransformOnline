@@ -12,46 +12,38 @@ const { Worker } = require('worker_threads');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+
 // In-memory cache for compiled SEF stylesheets
 const xsltCache = new Map();
 
-// Initialize XSLT Worker
-const xsltWorker = new Worker(path.join(__dirname, 'xslt_worker.js'));
-const pendingCompilations = new Map();
+// Path to xslt3 executable
+const xslt3Path = path.resolve(__dirname, 'node_modules', '.bin', 'xslt3');
+// Use the cmd shim on Windows? No, typically better to node executable directly if possible, 
+// otherwise use the .cmd on windows.
+// Let's use the node script directly for better control? 
+// The worker used: path.resolve(__dirname, 'node_modules', 'xslt3', 'xslt3.js');
+// Let's stick to spawning node with that script.
+const xslt3Script = path.resolve(__dirname, 'node_modules', 'xslt3', 'xslt3.js');
 
-xsltWorker.on('message', (msg) => {
-    if (msg.type === 'ready') {
-        console.log("XSLT Worker is ready and hot.");
-        return;
-    }
-    if (msg.type === 'error') {
-        console.error("XSLT Worker Error:", msg.error);
-        return;
-    }
-
-    // Handle compilation response
-    const { id, stdout, stderr, exitCode } = msg;
-    if (pendingCompilations.has(id)) {
-        const { resolve, reject } = pendingCompilations.get(id);
-        pendingCompilations.delete(id);
-
-        if (exitCode === 0) {
-            resolve({ stdout, stderr });
-        } else {
-            reject(new Error(`Worker exited with code ${exitCode}\nStderr: ${stderr}\nStdout: ${stdout}`));
-        }
-    }
-});
-
-xsltWorker.on('error', (err) => {
-    console.error("XSLT Worker Thread Error:", err);
-});
-
-function compileInWorker(args) {
+/**
+ * Helper to run xslt3 CLI in a child process
+ */
+async function runWithXslt3(args) {
     return new Promise((resolve, reject) => {
-        const id = Date.now().toString() + Math.random();
-        pendingCompilations.set(id, { resolve, reject });
-        xsltWorker.postMessage({ id, args });
+        // Increase maxBuffer for large outputs
+        // Increase stack size for the child process (16MB Stack)
+        execFile(process.execPath, [
+            '--stack-size=16384', // 16MB stack
+            xslt3Script,
+            ...args
+        ], { maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
+            if (error) {
+                // Warning: xslt3 might exit with non-zero but still have useful stderr
+                reject(new Error(`Process exited with code ${error.code}\nStderr: ${stderr}\nStdout: ${stdout}`));
+            } else {
+                resolve({ stdout, stderr });
+            }
+        });
     });
 }
 
@@ -86,6 +78,7 @@ app.post('/api/transform', async (req, res) => {
     const xmlPath = path.join(TEMP_DIR, `${uniqueId}.xml`);
     const xsltPath = path.join(TEMP_DIR, `${uniqueId}.xsl`);
     const sefPath = path.join(TEMP_DIR, `${uniqueId}.sef.json`);
+    const outputPath = path.join(TEMP_DIR, `${uniqueId}.out.xml`);
 
     try {
         // 1. Write content to temporary files
@@ -98,46 +91,61 @@ app.post('/api/transform', async (req, res) => {
         if (xsltCache.has(xsltHash)) {
             console.log("-> Cache HIT for XSLT. Using cached SEF.");
             sefContent = xsltCache.get(xsltHash);
+            // We need the file on disk for the CLI tool
+            await fs.writeJson(sefPath, sefContent);
         } else {
             console.log("-> Cache MISS for XSLT. Compiling...");
             await fs.writeFile(xsltPath, xslt);
 
-            console.log("   Compiling XSLT using Worker...");
-            console.time("XSLT3 Worker Time");
+            console.log("   Compiling XSLT using spawned process...");
+            console.time("XSLT3 Compile Time");
 
             try {
-                // Use persistent worker
-                const { stdout, stderr } = await compileInWorker([
+                // Compile XSLT to SEF
+                await runWithXslt3([
                     `-xsl:${xsltPath}`,
                     `-export:${sefPath}`,
                     '-nogo'
                 ]);
 
-                console.timeEnd("XSLT3 Worker Time");
-
-                if (stdout) console.log("   Worker stdout:", stdout);
-                if (stderr) console.error("   Worker stderr:", stderr);
+                console.timeEnd("XSLT3 Compile Time");
 
             } catch (compileError) {
                 console.error("   Compilation Error Details:", compileError);
                 throw new Error(`XSLT Compilation Failed: ${compileError.message}`);
             }
 
-            // Read compiled SEF
-            sefContent = await fs.readJson(sefPath);
-            // Update Cache
-            xsltCache.set(xsltHash, sefContent);
+            // Read compiled SEF to cache it
+            if (await fs.pathExists(sefPath)) {
+                sefContent = await fs.readJson(sefPath);
+                xsltCache.set(xsltHash, sefContent);
+            } else {
+                throw new Error("Compilation failed to produce SEF file.");
+            }
         }
 
-        // 3. Transform using SaxonJS
-        const result = await SaxonJS.transform({
-            stylesheetInternal: sefContent,
-            sourceFileName: xmlPath,
-            destination: "serialized"
-        }, "async");
+        // 3. Transform using spawned process
+        console.log("-> Transforming using spawned process...");
+        console.time("Transformation Time");
+
+        // CLI: xslt3 -s:source.xml -xsl:stylesheet.sef.json -o:output.xml -nogo
+        const { stdout, stderr } = await runWithXslt3([
+            `-s:${xmlPath}`,
+            `-xsl:${sefPath}`,
+            `-o:${outputPath}`,
+            `-nogo`
+        ]);
+
+        console.timeEnd("Transformation Time");
+        if (stderr) console.error("   Transform stderr:", stderr);
 
         // 4. Send result
-        res.json({ output: result.principalResult });
+        if (await fs.pathExists(outputPath)) {
+            const output = await fs.readFile(outputPath, 'utf8');
+            res.json({ output });
+        } else {
+            throw new Error("Transformation failed to produce output file.");
+        }
 
     } catch (error) {
         console.error("Transformation Error:", error);
@@ -145,11 +153,12 @@ app.post('/api/transform', async (req, res) => {
     } finally {
         // 5. Cleanup
         try {
-            await fs.remove(xmlPath);
-            // Only remove XSLT/SEF if they were physically created (Cache MISS)
-            // But fs.remove is safe to call even if files don't exist
-            await fs.remove(xsltPath);
-            await fs.remove(sefPath);
+            await Promise.all([
+                fs.unlink(xmlPath).catch(() => { }),
+                fs.unlink(xsltPath).catch(() => { }),
+                fs.unlink(sefPath).catch(() => { }),
+                fs.unlink(outputPath).catch(() => { })
+            ]);
         } catch (cleanupError) {
             console.error("Cleanup Error:", cleanupError);
         }
@@ -235,6 +244,8 @@ if (fs.existsSync(clientBuildPath)) {
     });
 }
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+server.timeout = 0; // No timeout
+server.keepAliveTimeout = 0; // No keep-alive timeout
