@@ -3,7 +3,10 @@ import axios from 'axios';
 import { Upload, Trash2, ArrowRightLeft, FileCode, Code, Loader2 } from 'lucide-react';
 
 // Configure Axios base URL
-axios.defaults.baseURL = 'http://localhost:3000';
+// Configure Axios base URL
+// In production, we serve from the same origin, so we use relative paths.
+// In development, we might target localhost:3000 explicitly if not proxied.
+axios.defaults.baseURL = import.meta.env.PROD ? '' : 'http://localhost:3000';
 
 function App() {
   const [xmlInput, setXmlInput] = useState('');
