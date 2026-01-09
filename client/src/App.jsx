@@ -53,6 +53,10 @@ function App() {
 
       console.log("Step 2: Transforming locally in Browser using SaxonJS...");
 
+      if (!window.SaxonJS) {
+        throw new Error("SaxonJS is not loaded in the browser. Please refresh the page or check your connection.");
+      }
+
       // Transform using SaxonJS
       // We use "async" execution to avoid freezing the UI for massive transforms
       const result = await window.SaxonJS.transform({
